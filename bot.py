@@ -13,13 +13,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from yoomoney import Client, Quickpay
+import requests
 
 # ========================= КОНФИГУРАЦИЯ =========================
-BOT_TOKEN = "8633169948:AAGNxJN0CseW6nLiS-FWhmAivjqM4jhxx44"  # От @BotFather
+BOT_TOKEN = "8633169948:AAGNxJN0CseW6nLiS-FWhmAivjqM4jhxx44"
 YOOMONEY_ACCESS_TOKEN = "4100118889570559.3288B2E716CEEB922A26BD6BEAC58648FBFB680CCF64E4E1447D714D6FB5EA5F01F1478FAC686BEF394C8A186C98982DE563C1ABCDF9F2F61D971B61DA3C7E486CA818F98B9E0069F1C0891E090DD56A11319D626A40F0AE8302A8339DED9EB7969617F191D93275F64C4127A3ECB7AED33FCDE91CA68690EB7534C67E6C219E"
 YOOMONEY_WALLET = "4100118889570559"
-ADMIN_ID = 8346538289  # ←←← ЗАМЕНИ НА СВОЙ TELEGRAM ID
+ADMIN_ID = 8346538289  # ←←← ЗАМЕНИ НА СВОЙ ID
+SUPPORT_USERNAME = "MetroShopSupport"  # ←←← Ник поддержки
 
 # ================================================================
 
@@ -85,7 +86,8 @@ def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Купить VPN конфиг", callback_data="buy")],
         [InlineKeyboardButton(text="📦 Мои покупки", callback_data="my_purchases")],
-        [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
+        [InlineKeyboardButton(text="💡 Инструкция", callback_data="info"),
+         InlineKeyboardButton(text="💬 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
     ])
 
 def admin_menu() -> InlineKeyboardMarkup:
@@ -100,7 +102,7 @@ def admin_menu() -> InlineKeyboardMarkup:
 def back_button() -> InlineKeyboardMarkup:
     """Кнопка назад"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
     ])
 
 # ====================== ОСНОВНЫЕ ХЕНДЛЕРЫ ======================
@@ -113,26 +115,33 @@ async def cmd_start(message: types.Message):
     logger.info(f"👤 Новый пользователь: {username} (ID: {user_id})")
     
     welcome_text = (
-        "🎮 <b>PUBG Mobile VPN Shop</b>\n\n"
-        "Профессиональные VPN-конфиги для стабильной игры:\n"
-        "✅ Низкий пинг\n"
-        "✅ Обход блокировок\n"
-        "✅ Моментальная выдача после оплаты\n\n"
-        "Выберите действие:"
+        "🌐 <b>Добро пожаловать в WIXYEZ VPN!</b>\n\n"
+        "🎮 Лучший сервис VPN-конфигов для <b>PUBG Mobile</b>\n\n"
+        "⚡️ <b>Наши преимущества:</b>\n"
+        "✅ Минимальный пинг для комфортной игры\n"
+        "✅ Обход любых блокировок\n"
+        "✅ Мгновенная автоматическая выдача\n"
+        "✅ Поддержка 24/7\n"
+        "✅ Стабильное соединение\n\n"
+        "📱 Выберите действие ниже:"
     )
     
     await message.answer(welcome_text, reply_markup=main_menu())
     
     if user_id == ADMIN_ID:
-        await message.answer("👑 <b>Админ-панель доступна</b>", reply_markup=admin_menu())
+        await message.answer("👑 <b>Режим администратора активирован</b>", reply_markup=admin_menu())
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
     """Команда /admin"""
     if message.from_user.id != ADMIN_ID:
-        return await message.answer("❌ У вас нет доступа к админ-панели")
+        return await message.answer("❌ Доступ запрещён")
     
-    await message.answer("🛠 <b>Панель администратора</b>", reply_markup=admin_menu())
+    await message.answer(
+        "🛠 <b>Панель управления WIXYEZ VPN</b>\n\n"
+        "Выберите нужное действие:",
+        reply_markup=admin_menu()
+    )
 
 # ====================== ПОКУПКА ======================
 @dp.callback_query(F.data == "buy")
@@ -146,8 +155,9 @@ async def show_configs(call: types.CallbackQuery):
 
     if not configs:
         return await call.message.edit_text(
-            "❌ В данный момент конфиги недоступны.\n"
-            "Попробуйте позже.",
+            "😔 <b>К сожалению, конфиги временно недоступны</b>\n\n"
+            "Мы уже работаем над пополнением ассортимента.\n"
+            "Попробуйте заглянуть позже!",
             reply_markup=back_button()
         )
 
@@ -155,15 +165,15 @@ async def show_configs(call: types.CallbackQuery):
     for config_id, name, price, _ in configs:
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{name} — {int(price)}₽",
+                text=f"⚡️ {name} — {int(price)}₽",
                 callback_data=f"cfg_{config_id}"
             )
         ])
-    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")])
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
 
     await call.message.edit_text(
-        "🛒 <b>Доступные VPN-конфиги:</b>\n\n"
-        "Выберите подходящий вариант:",
+        "🛒 <b>Доступные VPN-конфиги для PUBG Mobile</b>\n\n"
+        "Выберите подходящий тариф:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
@@ -186,14 +196,14 @@ async def show_config_details(call: types.CallbackQuery):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"💳 Оплатить {int(price)}₽", callback_data=f"pay_{config_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+        [InlineKeyboardButton(text="◀️ К списку конфигов", callback_data="buy")]
     ])
 
     await call.message.edit_text(
-        f"<b>📦 {name}</b>\n\n"
-        f"{description}\n\n"
-        f"💰 <b>Цена: {int(price)}₽</b>\n\n"
-        f"После оплаты конфиг придёт автоматически.",
+        f"⚡️ <b>{name}</b>\n\n"
+        f"📝 <b>Описание:</b>\n{description}\n\n"
+        f"💰 <b>Стоимость:</b> {int(price)}₽\n\n"
+        f"🎁 После оплаты конфиг придёт автоматически в течение 10 секунд!",
         reply_markup=kb
     )
 
@@ -217,14 +227,15 @@ async def create_payment(call: types.CallbackQuery):
     name, price = config
     label = str(uuid.uuid4())
 
-    # Создание формы оплаты YooMoney
-    quickpay = Quickpay(
-        receiver=YOOMONEY_WALLET,
-        quickpay_form="shop",
-        targets=f"Покупка VPN {name}",
-        paymentType="SB",
-        sum=price,
-        label=label
+    # Формируем URL для оплаты
+    payment_url = (
+        f"https://yoomoney.ru/quickpay/confirm?"
+        f"receiver={YOOMONEY_WALLET}"
+        f"&quickpay-form=shop"
+        f"&targets=WIXYEZ VPN - {name}"
+        f"&paymentType=SB"
+        f"&sum={price}"
+        f"&label={label}"
     )
 
     # Сохранение в базу
@@ -238,17 +249,18 @@ async def create_payment(call: types.CallbackQuery):
     logger.info(f"💳 Создан платёж: {username} ({user_id}) - {name} - {price}₽ - Label: {label}")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Перейти к оплате", url=quickpay.redirected_url)],
-        [InlineKeyboardButton(text="◀️ Отмена", callback_data=f"cfg_{config_id}")]
+        [InlineKeyboardButton(text="💳 Оплатить через ЮMoney", url=payment_url)],
+        [InlineKeyboardButton(text="◀️ Отменить", callback_data=f"cfg_{config_id}")]
     ])
 
     await call.message.edit_text(
-        f"✅ <b>Счёт создан</b>\n\n"
-        f"📦 Товар: <b>{name}</b>\n"
-        f"💰 Сумма: <b>{int(price)}₽</b>\n\n"
-        f"Нажмите кнопку ниже для оплаты.\n"
-        f"После успешной оплаты конфиг будет отправлен автоматически.\n\n"
-        f"⏱ Платёж действителен 1 час.",
+        f"✅ <b>Счёт успешно создан!</b>\n\n"
+        f"📦 <b>Товар:</b> {name}\n"
+        f"💰 <b>К оплате:</b> {int(price)}₽\n\n"
+        f"🔹 Нажмите кнопку ниже для перехода к оплате\n"
+        f"🔹 После успешной оплаты конфиг придёт автоматически\n"
+        f"🔹 Обычно это занимает 5-15 секунд\n\n"
+        f"⏱ <i>Срок действия счёта: 1 час</i>",
         reply_markup=kb
     )
 
@@ -271,7 +283,9 @@ async def show_purchases(call: types.CallbackQuery):
     if not purchases:
         return await call.message.edit_text(
             "📦 <b>У вас пока нет покупок</b>\n\n"
-            "Перейдите в раздел покупки, чтобы приобрести конфиг.",
+            "🛒 Перейдите в раздел покупки, чтобы приобрести VPN-конфиг!\n\n"
+            "⚡️ Быстрая автоматическая выдача\n"
+            "💯 Гарантия качества",
             reply_markup=back_button()
         )
     
@@ -279,15 +293,16 @@ async def show_purchases(call: types.CallbackQuery):
     for name, filename, _ in purchases:
         keyboard.append([
             InlineKeyboardButton(
-                text=f"📥 {name}",
+                text=f"📥 Скачать: {name}",
                 callback_data=f"download_{filename}"
             )
         ])
-    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")])
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")])
     
     await call.message.edit_text(
         "📦 <b>Ваши покупки:</b>\n\n"
-        "Нажмите на конфиг, чтобы скачать его заново:",
+        "Вы можете скачать любой конфиг повторно в любое время.\n"
+        "Нажмите на нужный файл:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
@@ -302,7 +317,11 @@ async def download_config(call: types.CallbackQuery):
     
     await call.message.answer_document(
         FSInputFile(filepath),
-        caption="📥 <b>Ваш конфиг</b>\n\nИмпортируйте его в VPN-клиент."
+        caption=(
+            "📥 <b>Ваш VPN-конфиг</b>\n\n"
+            "✅ Просто импортируйте файл в WireGuard\n"
+            "🎮 Наслаждайтесь игрой без лагов!"
+        )
     )
     await call.answer("✅ Конфиг отправлен")
 
@@ -311,137 +330,146 @@ async def download_config(call: types.CallbackQuery):
 async def show_info(call: types.CallbackQuery):
     """Показать информацию"""
     info_text = (
-        "ℹ️ <b>Как использовать конфиг?</b>\n\n"
-        "1️⃣ Скачайте VPN-клиент (например, WireGuard)\n"
-        "2️⃣ Импортируйте полученный .conf файл\n"
-        "3️⃣ Подключитесь к VPN\n"
-        "4️⃣ Наслаждайтесь стабильной игрой!\n\n"
+        "💡 <b>Как использовать конфиг?</b>\n\n"
+        "<b>1️⃣ Скачайте VPN-клиент (WireGuard)</b>\n"
+        "   • Android: Google Play\n"
+        "   • iOS: App Store\n\n"
+        "<b>2️⃣ Импортируйте полученный .conf файл</b>\n"
+        "   • Откройте WireGuard\n"
+        "   • Нажмите «+» или «Импорт из файла»\n"
+        "   • Выберите скачанный .conf файл\n\n"
+        "<b>3️⃣ Подключитесь к VPN</b>\n"
+        "   • Активируйте переключатель\n"
+        "   • Дождитесь подключения\n\n"
+        "<b>4️⃣ Наслаждайтесь стабильной игрой!</b>\n"
+        "   • Низкий пинг\n"
+        "   • Без лагов\n"
+        "   • Стабильное соединение\n\n"
+        "━━━━━━━━━━━━━━━━━━━\n\n"
         "❓ <b>Проблемы с подключением?</b>\n"
-        "Напишите @ℹ️ Как использовать конфиг?
-
-1️⃣ Скачайте VPN-клиент (WireGuard)
-2️⃣ Импортируйте полученный .conf файл
-3️⃣ Подключитесь к VPN
-4️⃣ Наслаждайтесь стабильной игрой!
-
-❓ Проблемы с подключением?
-Напишите @MetroShopSupport"
+        f"Напишите @{SUPPORT_USERNAME}\n"
+        "Мы поможем в течение 5 минут!"
     )
     
-    await call.message.edit_text(
-        info_text,
-        reply_markup=back_button()
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Связаться с поддержкой", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_main")]
+    ])
+    
+    await call.message.edit_text(info_text, reply_markup=kb)
 
 @dp.callback_query(F.data == "back_main")
 async def back_to_main(call: types.CallbackQuery):
     """Вернуться в главное меню"""
     await call.message.edit_text(
-        "🎮 <b>PUBG Mobile VPN Shop</b>\n\n"
-        "Выберите действие:",
+        "🌐 <b>WIXYEZ VPN</b>\n\n"
+        "🎮 Ваш надёжный помощник для PUBG Mobile\n\n"
+        "📱 Выберите действие:",
         reply_markup=main_menu()
     )
 
 # ====================== ПРОВЕРКА ПЛАТЕЖЕЙ ======================
 async def check_payments_loop():
-    """Фоновая проверка платежей"""
-    client = Client(YOOMONEY_ACCESS_TOKEN)
+    """Фоновая проверка платежей через API"""
     logger.info("🔄 Запущена проверка платежей")
     
     while True:
         try:
-            history = client.operation_history(records=50)
+            headers = {
+                "Authorization": f"Bearer {YOOMONEY_ACCESS_TOKEN}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
             
-            async with aiosqlite.connect("vpn_shop.db") as db:
-                for operation in history.operations:
-                    if operation.status != "success" or operation.direction != "in":
-                        continue
-                    
-                    label = operation.label
-                    if not label:
-                        continue
-                    
-                    # Проверяем, есть ли платёж в базе
-                    async with db.execute(
-                        "SELECT user_id, config_id, amount FROM payments WHERE label = ? AND status = 'pending'",
-                        (label,)
-                    ) as cursor:
-                        payment = await cursor.fetchone()
-                    
-                    if not payment:
-                        continue
-                    
-                    user_id, config_id, amount = payment
-                    
-                    # Обновляем статус платежа
-                    await db.execute(
-                        "UPDATE payments SET status = 'succeeded', completed_at = ? WHERE label = ?",
-                        (datetime.now().isoformat(), label)
-                    )
-                    
-                    # Добавляем в покупки
-                    async with db.execute(
-                        "SELECT username FROM payments WHERE label = ?", (label,)
-                    ) as cur:
-                        username = (await cur.fetchone())[0]
-                    
-                    await db.execute(
-                        "INSERT INTO purchases (user_id, username, config_id, purchased_at) VALUES (?, ?, ?, ?)",
-                        (user_id, username, config_id, datetime.now().isoformat())
-                    )
-                    await db.commit()
-                    
-                    # Получаем данные конфига
-                    async with db.execute(
-                        "SELECT filename, name FROM configs WHERE id = ?",
-                        (config_id,)
-                    ) as cursor:
-                        config = await cursor.fetchone()
-                    
-                    if config:
-                        filename, conf_name = config
-                        filepath = f"configs/{filename}"
+            response = requests.post(
+                "https://yoomoney.ru/api/operation-history",
+                headers=headers,
+                data={"records": 50}
+            )
+            
+            if response.status_code == 200:
+                history = response.json()
+                operations = history.get("operations", [])
+                
+                async with aiosqlite.connect("vpn_shop.db") as db:
+                    for operation in operations:
+                        if operation.get("status") != "success" or operation.get("direction") != "in":
+                            continue
                         
-                        if os.path.exists(filepath):
-                            try:
-                                await bot.send_document(
-                                    user_id,
-                                    FSInputFile(filepath),
-                                    caption=(
-                                        f"✅ <b>Оплата получена!</b>\n\n"
-                                        f"📦 Конфиг: <b>{conf_name}</b>\n"
-                                        f"💰 Сумма: <b>{int(amount)}₽</b>\n\n"
-                                        f"Импортируйте файл в ваш VPN-клиент.\n"
-                                        f"Приятной игры! 🎮"
+                        label = operation.get("label")
+                        if not label:
+                            continue
+                        
+                        async with db.execute(
+                            "SELECT user_id, config_id, amount FROM payments WHERE label = ? AND status = 'pending'",
+                            (label,)
+                        ) as cursor:
+                            payment = await cursor.fetchone()
+                        
+                        if not payment:
+                            continue
+                        
+                        user_id, config_id, amount = payment
+                        
+                        await db.execute(
+                            "UPDATE payments SET status = 'succeeded', completed_at = ? WHERE label = ?",
+                            (datetime.now().isoformat(), label)
+                        )
+                        
+                        async with db.execute(
+                            "SELECT username FROM payments WHERE label = ?", (label,)
+                        ) as cur:
+                            username = (await cur.fetchone())[0]
+                        
+                        await db.execute(
+                            "INSERT INTO purchases (user_id, username, config_id, purchased_at) VALUES (?, ?, ?, ?)",
+                            (user_id, username, config_id, datetime.now().isoformat())
+                        )
+                        await db.commit()
+                        
+                        async with db.execute(
+                            "SELECT filename, name FROM configs WHERE id = ?",
+                            (config_id,)
+                        ) as cursor:
+                            config = await cursor.fetchone()
+                        
+                        if config:
+                            filename, conf_name = config
+                            filepath = f"configs/{filename}"
+                            
+                            if os.path.exists(filepath):
+                                try:
+                                    await bot.send_document(
+                                        user_id,
+                                        FSInputFile(filepath),
+                                        caption=(
+                                            f"✅ <b>Оплата успешно получена!</b>\n\n"
+                                            f"📦 <b>Ваш конфиг:</b> {conf_name}\n"
+                                            f"💰 <b>Оплачено:</b> {int(amount)}₽\n\n"
+                                            f"🎯 <b>Что дальше?</b>\n"
+                                            f"1. Откройте WireGuard\n"
+                                            f"2. Импортируйте этот файл\n"
+                                            f"3. Подключитесь к VPN\n"
+                                            f"4. Играйте без лагов!\n\n"
+                                            f"🎮 <b>Приятной игры!</b>\n\n"
+                                            f"💬 Вопросы? Пишите @{SUPPORT_USERNAME}"
+                                        )
                                     )
-                                )
-                                logger.info(f"✅ Выдан конфиг {conf_name} пользователю {user_id}")
-                                
-                                # Уведомление админу
-                                await bot.send_message(
-                                    ADMIN_ID,
-                                    f"💰 <b>Новая продажа!</b>\n\n"
-                                    f"Пользователь: @{username}\n"
-                                    f"Конфиг: {conf_name}\n"
-                                    f"Сумма: {int(amount)}₽"
-                                )
-                            except Exception as e:
-                                logger.error(f"❌ Ошибка отправки конфига: {e}")
-                                await bot.send_message(
-                                    user_id,
-                                    "❌ Ошибка при отправке файла. Обратитесь в поддержку."
-                                )
-                        else:
-                            logger.error(f"❌ Файл не найден: {filepath}")
-                            await bot.send_message(
-                                user_id,
-                                "❌ Файл конфига не найден. Обратитесь в поддержку."
-                            )
+                                    logger.info(f"✅ Выдан конфиг {conf_name} пользователю {user_id}")
+                                    
+                                    await bot.send_message(
+                                        ADMIN_ID,
+                                        f"💰 <b>Новая продажа!</b>\n\n"
+                                        f"👤 Покупатель: @{username}\n"
+                                        f"📦 Конфиг: {conf_name}\n"
+                                        f"💵 Сумма: {int(amount)}₽"
+                                    )
+                                except Exception as e:
+                                    logger.error(f"❌ Ошибка отправки конфига: {e}")
         
         except Exception as e:
             logger.error(f"❌ Ошибка проверки платежей: {e}")
         
-        await asyncio.sleep(10)  # Проверка каждые 10 секунд
+        await asyncio.sleep(10)
 
 # ====================== АДМИН-ПАНЕЛЬ ======================
 @dp.callback_query(F.data == "add_config")
@@ -451,14 +479,22 @@ async def start_add_config(call: types.CallbackQuery, state: FSMContext):
         return
     
     await state.set_state(AddConfig.name)
-    await call.message.edit_text("📝 <b>Введите название конфига:</b>\n\nНапример: VPN EU Premium")
+    await call.message.edit_text(
+        "📝 <b>Добавление нового конфига</b>\n\n"
+        "Введите название конфига:\n"
+        "<i>Например: VPN EU Premium 🇪🇺</i>"
+    )
 
 @dp.message(AddConfig.name)
 async def process_config_name(message: types.Message, state: FSMContext):
     """Обработка названия конфига"""
     await state.update_data(name=message.text)
     await state.set_state(AddConfig.price)
-    await message.answer("💰 <b>Введите цену в рублях:</b>\n\nТолько число, например: 150")
+    await message.answer(
+        "💰 <b>Установка цены</b>\n\n"
+        "Введите стоимость в рублях:\n"
+        "<i>Только число, например: 150</i>"
+    )
 
 @dp.message(AddConfig.price)
 async def process_config_price(message: types.Message, state: FSMContext):
@@ -469,7 +505,11 @@ async def process_config_price(message: types.Message, state: FSMContext):
             raise ValueError
         await state.update_data(price=price)
         await state.set_state(AddConfig.description)
-        await message.answer("📄 <b>Введите описание конфига:</b>\n\nНапример: Быстрый сервер в Европе, пинг 20-30ms")
+        await message.answer(
+            "📄 <b>Описание конфига</b>\n\n"
+            "Введите подробное описание:\n"
+            "<i>Например: Быстрый сервер в Европе, пинг 15-25ms, идеально для PUBG Mobile</i>"
+        )
     except ValueError:
         await message.answer("❌ Введите корректную цену (число больше 0)")
 
@@ -478,7 +518,10 @@ async def process_config_description(message: types.Message, state: FSMContext):
     """Обработка описания конфига"""
     await state.update_data(description=message.text)
     await state.set_state(AddConfig.file)
-    await message.answer("📎 <b>Отправьте .conf файл:</b>")
+    await message.answer(
+        "📎 <b>Загрузка файла конфига</b>\n\n"
+        "Отправьте файл .conf:"
+    )
 
 @dp.message(AddConfig.file, F.document)
 async def process_config_file(message: types.Message, state: FSMContext):
@@ -501,9 +544,10 @@ async def process_config_file(message: types.Message, state: FSMContext):
 
     await message.answer(
         f"✅ <b>Конфиг успешно добавлен!</b>\n\n"
-        f"Название: {data['name']}\n"
-        f"Цена: {int(data['price'])}₽\n"
-        f"Описание: {data['description']}",
+        f"📦 Название: {data['name']}\n"
+        f"💰 Цена: {int(data['price'])}₽\n"
+        f"📝 Описание: {data['description']}\n\n"
+        f"Конфиг уже доступен для покупки!",
         reply_markup=admin_menu()
     )
     await state.clear()
@@ -521,13 +565,14 @@ async def list_all_configs(call: types.CallbackQuery):
 
     if not configs:
         return await call.message.edit_text(
-            "📋 <b>Список конфигов пуст</b>",
+            "📋 <b>Список конфигов пуст</b>\n\n"
+            "Добавьте первый конфиг!",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
             ])
         )
 
-    text = "📋 <b>Все конфиги:</b>\n\n"
+    text = "📋 <b>Все конфиги в магазине:</b>\n\n"
     for config_id, name, price, created_at in configs:
         text += f"🆔 <code>{config_id}</code> | {name} — {int(price)}₽\n"
 
@@ -555,10 +600,11 @@ async def show_stats(call: types.CallbackQuery):
             unique_buyers = (await cursor.fetchone())[0]
 
     stats_text = (
-        f"📊 <b>Статистика магазина</b>\n\n"
-        f"💰 Общая выручка: <b>{int(total_revenue)}₽</b>\n"
-        f"📦 Продано конфигов: <b>{total_sales}</b>\n"
-        f"👥 Уникальных покупателей: <b>{unique_buyers}</b>\n"
+        f"📊 <b>Статистика WIXYEZ VPN</b>\n\n"
+        f"💰 <b>Общая выручка:</b> {int(total_revenue)}₽\n"
+        f"📦 <b>Продано конфигов:</b> {total_sales} шт.\n"
+        f"👥 <b>Уникальных покупателей:</b> {unique_buyers}\n"
+        f"📈 <b>Средний чек:</b> {int(total_revenue / total_sales) if total_sales > 0 else 0}₽\n"
     )
 
     await call.message.edit_text(
@@ -608,7 +654,8 @@ async def show_recent_payments(call: types.CallbackQuery):
 async def back_to_admin(call: types.CallbackQuery):
     """Вернуться в админ-панель"""
     await call.message.edit_text(
-        "🛠 <b>Панель администратора</b>",
+        "🛠 <b>Панель управления WIXYEZ VPN</b>\n\n"
+        "Выберите нужное действие:",
         reply_markup=admin_menu()
     )
 
@@ -618,12 +665,12 @@ async def on_startup():
     await init_db()
     asyncio.create_task(check_payments_loop())
     logger.info("=" * 50)
-    logger.info("🚀 VPN Shop Bot успешно запущен!")
+    logger.info("🚀 WIXYEZ VPN Bot успешно запущен!")
     logger.info("=" * 50)
 
 async def on_shutdown():
     """Действия при остановке"""
-    logger.info("🛑 Бот остановлен")
+    logger.info("🛑 WIXYEZ VPN Bot остановлен")
 
 async def main():
     """Главная функция"""
