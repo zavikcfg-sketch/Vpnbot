@@ -60,6 +60,7 @@ async def init_db():
                 price REAL NOT NULL,
                 description TEXT,
                 filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
             
@@ -456,7 +457,7 @@ async def show_purchases(call: types.CallbackQuery):
     
     async with aiosqlite.connect("vpn_shop.db") as db:
         async with db.execute("""
-            SELECT c.name, c.filename, p.purchased_at 
+            SELECT c.name, c.filename, c.original_filename, p.purchased_at 
             FROM purchases p
             JOIN configs c ON p.config_id = c.id
             WHERE p.user_id = ?
@@ -474,7 +475,7 @@ async def show_purchases(call: types.CallbackQuery):
         )
     
     keyboard = []
-    for name, filename, _ in purchases:
+    for name, filename, original_filename, _ in purchases:
         keyboard.append([
             InlineKeyboardButton(
                 text=f"📥 Скачать: {name}",
@@ -499,8 +500,18 @@ async def download_config(call: types.CallbackQuery):
     if not os.path.exists(filepath):
         return await call.answer("❌ Файл не найден на сервере", show_alert=True)
     
+    # Получаем оригинальное имя файла
+    async with aiosqlite.connect("vpn_shop.db") as db:
+        async with db.execute(
+            "SELECT original_filename FROM configs WHERE filename = ?",
+            (filename,)
+        ) as cursor:
+            result = await cursor.fetchone()
+            original_filename = result[0] if result else filename
+    
+    # Отправляем с оригинальным именем
     await call.message.answer_document(
-        FSInputFile(filepath),
+        FSInputFile(filepath, filename=original_filename),
         caption=(
             "📥 <b>Ваш VPN-конфиг</b>\n\n"
             "✅ Просто импортируйте файл в WireGuard\n"
@@ -611,20 +622,20 @@ async def check_payments_loop():
                         await db.commit()
                         
                         async with db.execute(
-                            "SELECT filename, name FROM configs WHERE id = ?",
+                            "SELECT filename, original_filename, name FROM configs WHERE id = ?",
                             (config_id,)
                         ) as cursor:
                             config = await cursor.fetchone()
                         
                         if config:
-                            filename, conf_name = config
+                            filename, original_filename, conf_name = config
                             filepath = f"configs/{filename}"
                             
                             if os.path.exists(filepath):
                                 try:
                                     await bot.send_document(
                                         user_id,
-                                        FSInputFile(filepath),
+                                        FSInputFile(filepath, filename=original_filename),
                                         caption=(
                                             f"✅ <b>Оплата успешно получена!</b>\n\n"
                                             f"📦 <b>Ваш конфиг:</b> {conf_name}\n"
@@ -716,15 +727,16 @@ async def process_config_file(message: types.Message, state: FSMContext):
         return await message.answer("❌ Необходимо отправить файл с расширением .conf")
 
     data = await state.get_data()
-    filename = f"{uuid.uuid4()}.conf"
+    original_filename = message.document.file_name  # Сохраняем оригинальное имя
+    filename = f"{uuid.uuid4()}.conf"  # Уникальное имя для хранения
     filepath = f"configs/{filename}"
 
     await bot.download(message.document, destination=filepath)
 
     async with aiosqlite.connect("vpn_shop.db") as db:
         await db.execute(
-            "INSERT INTO configs (name, price, description, filename, created_at) VALUES (?, ?, ?, ?, ?)",
-            (data["name"], data["price"], data["description"], filename, datetime.now().isoformat())
+            "INSERT INTO configs (name, price, description, filename, original_filename, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (data["name"], data["price"], data["description"], filename, original_filename, datetime.now().isoformat())
         )
         await db.commit()
 
@@ -732,12 +744,13 @@ async def process_config_file(message: types.Message, state: FSMContext):
         f"✅ <b>Конфиг успешно добавлен!</b>\n\n"
         f"📦 Название: {data['name']}\n"
         f"💰 Цена: {int(data['price'])}₽\n"
-        f"📝 Описание: {data['description']}\n\n"
+        f"📝 Описание: {data['description']}\n"
+        f"📄 Файл: {original_filename}\n\n"
         f"Конфиг уже доступен для покупки!",
         reply_markup=admin_menu()
     )
     await state.clear()
-    logger.info(f"➕ Добавлен новый конфиг: {data['name']}")
+    logger.info(f"➕ Добавлен новый конфиг: {data['name']} ({original_filename})")
 
 # === СПИСОК КОНФИГОВ ===
 @dp.callback_query(F.data == "list_configs")
@@ -747,7 +760,7 @@ async def list_all_configs(call: types.CallbackQuery):
         return
     
     async with aiosqlite.connect("vpn_shop.db") as db:
-        async with db.execute("SELECT id, name, price, created_at FROM configs ORDER BY id DESC") as cursor:
+        async with db.execute("SELECT id, name, price, original_filename, created_at FROM configs ORDER BY id DESC") as cursor:
             configs = await cursor.fetchall()
 
     if not configs:
@@ -760,8 +773,9 @@ async def list_all_configs(call: types.CallbackQuery):
         )
 
     text = "📋 <b>Все конфиги в магазине:</b>\n\n"
-    for config_id, name, price, created_at in configs:
+    for config_id, name, price, original_filename, created_at in configs:
         text += f"🆔 <code>{config_id}</code> | {name} — {int(price)}₽\n"
+        text += f"   └ 📄 {original_filename}\n\n"
 
     await call.message.edit_text(
         text,
