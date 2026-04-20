@@ -88,7 +88,8 @@ async def init_db():
                 first_name TEXT,
                 last_name TEXT,
                 joined_at TEXT NOT NULL,
-                last_activity TEXT
+                last_activity TEXT,
+                has_access INTEGER DEFAULT 0
             );
             
             CREATE TABLE IF NOT EXISTS channels (
@@ -110,8 +111,8 @@ async def add_user(user_id: int, username: str = None, first_name: str = None, l
     """Добавить пользователя в базу"""
     async with aiosqlite.connect("vpn_shop.db") as db:
         await db.execute(
-            """INSERT OR IGNORE INTO users (user_id, username, first_name, last_name, joined_at, last_activity) 
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT OR IGNORE INTO users (user_id, username, first_name, last_name, joined_at, last_activity, has_access) 
+               VALUES (?, ?, ?, ?, ?, ?, 0)""",
             (user_id, username, first_name, last_name, datetime.now().isoformat(), datetime.now().isoformat())
         )
         await db.execute(
@@ -119,6 +120,29 @@ async def add_user(user_id: int, username: str = None, first_name: str = None, l
             (datetime.now().isoformat(), user_id)
         )
         await db.commit()
+
+async def grant_access(user_id: int):
+    """Предоставить доступ пользователю"""
+    async with aiosqlite.connect("vpn_shop.db") as db:
+        await db.execute(
+            "UPDATE users SET has_access = 1 WHERE user_id = ?",
+            (user_id,)
+        )
+        await db.commit()
+
+async def has_access(user_id: int) -> bool:
+    """Проверить, есть ли доступ у пользователя"""
+    # Админ всегда имеет доступ
+    if user_id == ADMIN_ID:
+        return True
+    
+    async with aiosqlite.connect("vpn_shop.db") as db:
+        async with db.execute(
+            "SELECT has_access FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            result = await cursor.fetchone()
+            return result and result[0] == 1
 
 async def get_active_channels():
     """Получить активные каналы"""
@@ -133,7 +157,7 @@ async def check_subscription(user_id: int) -> bool:
     channels = await get_active_channels()
     
     if not channels:
-        return True  # Если нет каналов, пропускаем проверку
+        return True  # Если нет каналов, доступ открыт
     
     for channel_id, _ in channels:
         try:
@@ -141,7 +165,7 @@ async def check_subscription(user_id: int) -> bool:
             if member.status in ['left', 'kicked']:
                 return False
         except Exception as e:
-            logger.error(f"Ошибка проверки подписки: {e}")
+            logger.error(f"Ошибка проверки подписки на {channel_id}: {e}")
             return False
     
     return True
@@ -187,43 +211,33 @@ async def subscription_keyboard():
     keyboard = []
     
     for channel_id, channel_name in channels:
-        keyboard.append([InlineKeyboardButton(text=f"📢 {channel_name}", url=f"https://t.me/{channel_id.replace('@', '')}")])
+        # Убираем @ если есть для формирования ссылки
+        clean_id = channel_id.replace('@', '')
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"📢 {channel_name}",
+                url=f"https://t.me/{clean_id}"
+            )
+        ])
     
     keyboard.append([InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # ====================== ПРОВЕРКА ПОДПИСКИ ======================
-async def subscription_check(user_id: int, callback_query: types.CallbackQuery = None):
-    """Проверка подписки перед доступом"""
-    is_subscribed = await check_subscription(user_id)
-    
-    if not is_subscribed:
-        channels = await get_active_channels()
-        if channels:
-            text = (
-                "🔒 <b>Для использования бота подпишитесь на наши каналы:</b>\n\n"
-                "После подписки нажмите кнопку ниже 👇"
-            )
-            
-            if callback_query:
-                await callback_query.message.edit_text(
-                    text,
-                    reply_markup=await subscription_keyboard()
-                )
-            
-            return False
-    
-    return True
-
 @dp.callback_query(F.data == "check_subscription")
 async def check_sub_callback(call: types.CallbackQuery):
     """Проверка подписки по кнопке"""
-    is_subscribed = await check_subscription(call.from_user.id)
+    user_id = call.from_user.id
+    
+    is_subscribed = await check_subscription(user_id)
     
     if is_subscribed:
+        # Предоставляем доступ
+        await grant_access(user_id)
         await call.answer("✅ Подписка подтверждена!", show_alert=True)
         await call.message.edit_text(
+            "🎉 <b>Отлично! Теперь у вас есть доступ к боту!</b>\n\n"
             "🌐 <b>WIXYEZ VPN</b>\n\n"
             "🎮 Ваш надёжный помощник для PUBG Mobile\n\n"
             "📱 Выберите действие:",
@@ -244,19 +258,28 @@ async def cmd_start(message: types.Message):
     await add_user(user_id, username, first_name, last_name)
     logger.info(f"👤 Пользователь: {username} (ID: {user_id})")
     
-    # Проверка подписки
-    is_subscribed = await check_subscription(user_id)
-    
-    if not is_subscribed:
+    # Проверяем доступ
+    if not await has_access(user_id):
         channels = await get_active_channels()
+        
         if channels:
+            # Есть обязательные каналы - требуем подписку
             await message.answer(
-                "🔒 <b>Для использования бота подпишитесь на наши каналы:</b>\n\n"
+                "👋 <b>Добро пожаловать в WIXYEZ VPN!</b>\n\n"
+                "🔒 Для использования бота подпишитесь на наши каналы:\n\n"
                 "После подписки нажмите кнопку ниже 👇",
                 reply_markup=await subscription_keyboard()
             )
-            return
-    
+        else:
+            # Нет обязательных каналов - даём доступ сразу
+            await grant_access(user_id)
+            await show_welcome(message)
+    else:
+        # Доступ уже есть
+        await show_welcome(message)
+
+async def show_welcome(message: types.Message):
+    """Показать приветствие с доступом"""
     welcome_text = (
         "🌐 <b>Добро пожаловать в WIXYEZ VPN!</b>\n\n"
         "🎮 Лучший сервис VPN-конфигов для <b>PUBG Mobile</b>\n\n"
@@ -271,7 +294,7 @@ async def cmd_start(message: types.Message):
     
     await message.answer(welcome_text, reply_markup=main_menu())
     
-    if user_id == ADMIN_ID:
+    if message.from_user.id == ADMIN_ID:
         await message.answer("👑 <b>Режим администратора активирован</b>", reply_markup=admin_menu())
 
 @dp.message(Command("admin"))
@@ -290,9 +313,15 @@ async def cmd_admin(message: types.Message):
 @dp.callback_query(F.data == "buy")
 async def show_configs(call: types.CallbackQuery):
     """Показать список доступных конфигов"""
-    # Проверка подписки
-    if not await subscription_check(call.from_user.id, call):
-        return
+    # Проверка доступа
+    if not await has_access(call.from_user.id):
+        channels = await get_active_channels()
+        if channels:
+            return await call.message.edit_text(
+                "🔒 <b>Для доступа к боту подпишитесь на наши каналы:</b>\n\n"
+                "После подписки нажмите кнопку ниже 👇",
+                reply_markup=await subscription_keyboard()
+            )
     
     async with aiosqlite.connect("vpn_shop.db") as db:
         async with db.execute(
@@ -413,9 +442,15 @@ async def create_payment(call: types.CallbackQuery):
 @dp.callback_query(F.data == "my_purchases")
 async def show_purchases(call: types.CallbackQuery):
     """Показать покупки пользователя"""
-    # Проверка подписки
-    if not await subscription_check(call.from_user.id, call):
-        return
+    # Проверка доступа
+    if not await has_access(call.from_user.id):
+        channels = await get_active_channels()
+        if channels:
+            return await call.message.edit_text(
+                "🔒 <b>Для доступа к боту подпишитесь на наши каналы:</b>\n\n"
+                "После подписки нажмите кнопку ниже 👇",
+                reply_markup=await subscription_keyboard()
+            )
     
     user_id = call.from_user.id
     
@@ -747,6 +782,10 @@ async def show_full_stats(call: types.CallbackQuery):
         async with db.execute("SELECT COUNT(*) FROM users") as cursor:
             total_users = (await cursor.fetchone())[0]
         
+        # Пользователи с доступом
+        async with db.execute("SELECT COUNT(*) FROM users WHERE has_access = 1") as cursor:
+            users_with_access = (await cursor.fetchone())[0]
+        
         # Пользователи за сегодня
         today = datetime.now().date().isoformat()
         async with db.execute(
@@ -781,9 +820,10 @@ async def show_full_stats(call: types.CallbackQuery):
     stats_text = (
         f"📊 <b>ПОЛНАЯ СТАТИСТИКА WIXYEZ VPN</b>\n\n"
         f"👥 <b>ПОЛЬЗОВАТЕЛИ:</b>\n"
-        f"├ Всего: <b>{total_users}</b>\n"
-        f"├ За сегодня: <b>{users_today}</b>\n"
-        f"└ За неделю: <b>{users_week}</b>\n\n"
+        f"├ Всего зарегистрировано: <b>{total_users}</b>\n"
+        f"├ С доступом к боту: <b>{users_with_access}</b>\n"
+        f"├ Новых за сегодня: <b>{users_today}</b>\n"
+        f"└ Новых за неделю: <b>{users_week}</b>\n\n"
         f"💰 <b>ФИНАНСЫ:</b>\n"
         f"├ Общая выручка: <b>{int(total_revenue)}₽</b>\n"
         f"├ Продано конфигов: <b>{total_sales}</b>\n"
@@ -810,6 +850,7 @@ async def manage_channels_menu(call: types.CallbackQuery):
     
     await call.message.edit_text(
         "👥 <b>Управление обязательными каналами</b>\n\n"
+        "Пользователь получит доступ только после подписки на все активные каналы.\n\n"
         "Выберите действие:",
         reply_markup=channels_menu()
     )
@@ -822,10 +863,10 @@ async def start_add_channel(call: types.CallbackQuery, state: FSMContext):
     
     await state.set_state(AddChannel.channel_id)
     await call.message.edit_text(
-        "➕ <b>Добавление канала</b>\n\n"
+        "➕ <b>Добавление обязательного канала</b>\n\n"
         "Введите ID или username канала:\n"
         "<i>Например: @your_channel или -1001234567890</i>\n\n"
-        "⚠️ Бот должен быть админом канала!"
+        "⚠️ <b>Важно:</b> Бот должен быть админом канала!"
     )
 
 @dp.message(AddChannel.channel_id)
@@ -840,7 +881,7 @@ async def process_channel_id(message: types.Message, state: FSMContext):
         await state.set_state(AddChannel.channel_name)
         await message.answer(
             f"✅ Канал найден: <b>{chat.title}</b>\n\n"
-            f"Введите название для отображения:\n"
+            f"Введите название для отображения пользователям:\n"
             f"<i>Например: Основной канал</i>"
         )
     except Exception as e:
@@ -848,7 +889,8 @@ async def process_channel_id(message: types.Message, state: FSMContext):
             f"❌ Ошибка: {e}\n\n"
             "Убедитесь, что:\n"
             "• ID/username введён правильно\n"
-            "• Бот добавлен в канал как администратор"
+            "• Бот добавлен в канал как администратор\n"
+            "• Канал не является приватным чатом"
         )
         await state.clear()
 
@@ -870,12 +912,12 @@ async def process_channel_name(message: types.Message, state: FSMContext):
                 f"✅ <b>Канал успешно добавлен!</b>\n\n"
                 f"ID: <code>{data['channel_id']}</code>\n"
                 f"Название: {channel_name}\n\n"
-                f"Теперь все новые пользователи должны будут подписаться на этот канал.",
+                f"Теперь все новые пользователи должны будут подписаться на этот канал для получения доступа к боту.",
                 reply_markup=admin_menu()
             )
             logger.info(f"➕ Добавлен канал: {channel_name} ({data['channel_id']})")
         except Exception as e:
-            await message.answer(f"❌ Ошибка при добавлении: {e}")
+            await message.answer(f"❌ Ошибка при добавлении: {e}\n\nВозможно канал уже добавлен.")
     
     await state.clear()
 
@@ -894,18 +936,20 @@ async def list_all_channels(call: types.CallbackQuery):
     if not channels:
         return await call.message.edit_text(
             "📋 <b>Список каналов пуст</b>\n\n"
-            "Добавьте первый канал!",
+            "Добавьте первый канал!\n"
+            "Пока нет обязательных каналов - бот доступен всем без подписки.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="manage_channels")]
             ])
         )
 
-    text = "📋 <b>Обязательные каналы:</b>\n\n"
+    text = "📋 <b>Обязательные каналы для подписки:</b>\n\n"
     keyboard = []
     
     for ch_id, channel_id, channel_name, is_active in channels:
-        status = "✅" if is_active else "❌"
-        text += f"{status} <code>{ch_id}</code> | {channel_name}\n"
+        status = "✅ Активен" if is_active else "❌ Отключён"
+        text += f"{status} | <code>{ch_id}</code> | {channel_name}\n"
+        text += f"   └ ID: <code>{channel_id}</code>\n\n"
         
         toggle_text = "❌ Отключить" if is_active else "✅ Включить"
         keyboard.append([
@@ -932,9 +976,13 @@ async def toggle_channel(call: types.CallbackQuery):
     
     async with aiosqlite.connect("vpn_shop.db") as db:
         async with db.execute(
-            "SELECT is_active FROM channels WHERE id = ?", (channel_db_id,)
+            "SELECT is_active, channel_name FROM channels WHERE id = ?", (channel_db_id,)
         ) as cursor:
-            is_active = (await cursor.fetchone())[0]
+            result = await cursor.fetchone()
+            if not result:
+                return await call.answer("❌ Канал не найден", show_alert=True)
+            
+            is_active, channel_name = result
         
         new_status = 0 if is_active else 1
         await db.execute(
@@ -944,7 +992,7 @@ async def toggle_channel(call: types.CallbackQuery):
         await db.commit()
     
     status_text = "включён" if new_status else "отключён"
-    await call.answer(f"✅ Канал {status_text}", show_alert=True)
+    await call.answer(f"✅ Канал '{channel_name}' {status_text}", show_alert=True)
     
     # Обновляем список
     await list_all_channels(call)
@@ -959,7 +1007,7 @@ async def start_broadcast(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(BroadcastState.message)
     await call.message.edit_text(
         "📢 <b>Массовая рассылка</b>\n\n"
-        "Отправьте сообщение для рассылки всем пользователям:\n"
+        "Отправьте сообщение для рассылки всем пользователям с доступом:\n"
         "<i>(Можно отправить текст, фото, видео или документ)</i>"
     )
 
@@ -969,7 +1017,7 @@ async def process_broadcast_message(message: types.Message, state: FSMContext):
     await state.update_data(message_id=message.message_id, chat_id=message.chat.id)
     
     async with aiosqlite.connect("vpn_shop.db") as db:
-        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+        async with db.execute("SELECT COUNT(*) FROM users WHERE has_access = 1") as cursor:
             total_users = (await cursor.fetchone())[0]
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -979,7 +1027,7 @@ async def process_broadcast_message(message: types.Message, state: FSMContext):
     
     await message.answer(
         f"📢 <b>Подтвердите рассылку</b>\n\n"
-        f"Сообщение будет отправлено <b>{total_users}</b> пользователям",
+        f"Сообщение будет отправлено <b>{total_users}</b> пользователям с доступом к боту",
         reply_markup=kb
     )
     await state.set_state(BroadcastState.confirm)
@@ -997,7 +1045,7 @@ async def confirm_broadcast(call: types.CallbackQuery, state: FSMContext):
     await call.message.edit_text("📤 <b>Рассылка началась...</b>")
     
     async with aiosqlite.connect("vpn_shop.db") as db:
-        async with db.execute("SELECT user_id FROM users") as cursor:
+        async with db.execute("SELECT user_id FROM users WHERE has_access = 1") as cursor:
             users = await cursor.fetchall()
     
     success = 0
@@ -1054,8 +1102,9 @@ async def show_recent_payments(call: types.CallbackQuery):
     text = "💳 <b>Последние 15 платежей:</b>\n\n"
     for username, conf_name, amount, status, created_at in payments:
         status_emoji = "✅" if status == "succeeded" else "⏳"
-        date = created_at[:10]
-        text += f"{status_emoji} @{username} | {conf_name} | {int(amount)}₽ | {date}\n"
+        date = created_at[:16].replace('T', ' ')
+        text += f"{status_emoji} @{username}\n"
+        text += f"   └ {conf_name} | {int(amount)}₽ | {date}\n\n"
 
     await call.message.edit_text(
         text,
