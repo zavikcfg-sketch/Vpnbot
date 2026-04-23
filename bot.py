@@ -16,7 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import requests
 
 # ========================= КОНФИГУРАЦИЯ =========================
-BOT_TOKEN = "8633169948:AAHguEOnRfCo7X9RxK2zvkIPvUR20zha7hE"
+BOT_TOKEN = "8633169948:AAGNxJN0CseW6nLiS-FWhmAivjqM4jhxx44"
 YOOMONEY_ACCESS_TOKEN = "4100118889570559.3288B2E716CEEB922A26BD6BEAC58648FBFB680CCF64E4E1447D714D6FB5EA5F01F1478FAC686BEF394C8A186C98982DE563C1ABCDF9F2F61D971B61DA3C7E486CA818F98B9E0069F1C0891E090DD56A11319D626A40F0AE8302A8339DED9EB7969617F191D93275F64C4127A3ECB7AED33FCDE91CA68690EB7534C67E6C219E"
 YOOMONEY_WALLET = "4100118889570559"
 ADMIN_ID = 8346538289  # ←←← ЗАМЕНИ НА СВОЙ ID
@@ -510,15 +510,19 @@ async def download_config(call: types.CallbackQuery):
             original_filename = result[0] if result else filename
     
     # Отправляем с оригинальным именем
-    await call.message.answer_document(
-        FSInputFile(filepath, filename=original_filename),
-        caption=(
-            "📥 <b>Ваш VPN-конфиг</b>\n\n"
-            "✅ Просто импортируйте файл в WireGuard\n"
-            "🎮 Наслаждайтесь игрой без лагов!"
+    try:
+        await call.message.answer_document(
+            FSInputFile(filepath, filename=original_filename),
+            caption=(
+                "📥 <b>Ваш VPN-конфиг</b>\n\n"
+                "✅ Просто импортируйте файл в WireGuard\n"
+                "🎮 Наслаждайтесь игрой без лагов!"
+            )
         )
-    )
-    await call.answer("✅ Конфиг отправлен")
+        await call.answer("✅ Конфиг отправлен")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке конфига: {e}")
+        await call.answer("❌ Ошибка при отправке файла", show_alert=True)
 
 # ====================== ИНФОРМАЦИЯ ======================
 @dp.callback_query(F.data == "info")
@@ -791,69 +795,76 @@ async def show_full_stats(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     
-    async with aiosqlite.connect("vpn_shop.db") as db:
-        # Всего пользователей
-        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
-            total_users = (await cursor.fetchone())[0]
-        
-        # Пользователи с доступом
-        async with db.execute("SELECT COUNT(*) FROM users WHERE has_access = 1") as cursor:
-            users_with_access = (await cursor.fetchone())[0]
-        
-        # Пользователи за сегодня
-        today = datetime.now().date().isoformat()
-        async with db.execute(
-            "SELECT COUNT(*) FROM users WHERE DATE(joined_at) = ?", (today,)
-        ) as cursor:
-            users_today = (await cursor.fetchone())[0]
-        
-        # Пользователи за неделю
-        async with db.execute(
-            "SELECT COUNT(*) FROM users WHERE DATE(joined_at) >= DATE('now', '-7 days')"
-        ) as cursor:
-            users_week = (await cursor.fetchone())[0]
-        
-        # Продажи
-        async with db.execute("SELECT COUNT(*) FROM purchases") as cursor:
-            total_sales = (await cursor.fetchone())[0]
-        
-        # Выручка
-        async with db.execute("SELECT SUM(amount) FROM payments WHERE status = 'succeeded'") as cursor:
-            total_revenue = (await cursor.fetchone())[0] or 0
-        
-        # Уникальные покупатели
-        async with db.execute("SELECT COUNT(DISTINCT user_id) FROM purchases") as cursor:
-            unique_buyers = (await cursor.fetchone())[0]
-        
-        # Средний чек
-        avg_check = int(total_revenue / total_sales) if total_sales > 0 else 0
-        
-        # Конверсия
-        conversion = round((unique_buyers / total_users * 100), 2) if total_users > 0 else 0
+    try:
+        async with aiosqlite.connect("vpn_shop.db") as db:
+            # Всего пользователей
+            async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+                total_users = (await cursor.fetchone())[0]
+            
+            # Пользователи с доступом
+            async with db.execute("SELECT COUNT(*) FROM users WHERE has_access = 1") as cursor:
+                users_with_access = (await cursor.fetchone())[0]
+            
+            # Пользователи за сегодня
+            today = datetime.now().date().isoformat()
+            async with db.execute(
+                "SELECT COUNT(*) FROM users WHERE DATE(joined_at) = ?", (today,)
+            ) as cursor:
+                users_today = (await cursor.fetchone())[0]
+            
+            # Пользователи за неделю
+            async with db.execute(
+                "SELECT COUNT(*) FROM users WHERE DATE(joined_at) >= DATE('now', '-7 days')"
+            ) as cursor:
+                users_week = (await cursor.fetchone())[0]
+            
+            # Продажи
+            async with db.execute("SELECT COUNT(*) FROM purchases") as cursor:
+                total_sales = (await cursor.fetchone())[0]
+            
+            # Выручка
+            async with db.execute("SELECT SUM(amount) FROM payments WHERE status = 'succeeded'") as cursor:
+                total_revenue = (await cursor.fetchone())[0] or 0
+            
+            # Уникальные покупатели
+            async with db.execute("SELECT COUNT(DISTINCT user_id) FROM purchases") as cursor:
+                unique_buyers = (await cursor.fetchone())[0]
+            
+            # Средний чек
+            avg_check = int(total_revenue / total_sales) if total_sales > 0 else 0
+            
+            # Конверсия
+            conversion = round((unique_buyers / total_users * 100), 2) if total_users > 0 else 0
 
-    stats_text = (
-        f"📊 <b>ПОЛНАЯ СТАТИСТИКА WIXYEZ VPN</b>\n\n"
-        f"👥 <b>ПОЛЬЗОВАТЕЛИ:</b>\n"
-        f"├ Всего зарегистрировано: <b>{total_users}</b>\n"
-        f"├ С доступом к боту: <b>{users_with_access}</b>\n"
-        f"├ Новых за сегодня: <b>{users_today}</b>\n"
-        f"└ Новых за неделю: <b>{users_week}</b>\n\n"
-        f"💰 <b>ФИНАНСЫ:</b>\n"
-        f"├ Общая выручка: <b>{int(total_revenue)}₽</b>\n"
-        f"├ Продано конфигов: <b>{total_sales}</b>\n"
-        f"├ Средний чек: <b>{avg_check}₽</b>\n"
-        f"└ Уникальных покупателей: <b>{unique_buyers}</b>\n\n"
-        f"📈 <b>КОНВЕРСИЯ:</b>\n"
-        f"└ Из посетителей в покупатели: <b>{conversion}%</b>"
-    )
+        stats_text = (
+            f"📊 <b>ПОЛНАЯ СТАТИСТИКА WIXYEZ VPN</b>\n\n"
+            f"👥 <b>ПОЛЬЗОВАТЕЛИ:</b>\n"
+            f"├ Всего зарегистрировано: <b>{total_users}</b>\n"
+            f"├ С доступом к боту: <b>{users_with_access}</b>\n"
+            f"├ Новых за сегодня: <b>{users_today}</b>\n"
+            f"└ Новых за неделю: <b>{users_week}</b>\n\n"
+            f"💰 <b>ФИНАНСЫ:</b>\n"
+            f"├ Общая выручка: <b>{int(total_revenue)}₽</b>\n"
+            f"├ Продано конфигов: <b>{total_sales}</b>\n"
+            f"├ Средний чек: <b>{avg_check}₽</b>\n"
+            f"└ Уникальных покупателей: <b>{unique_buyers}</b>\n\n"
+            f"📈 <b>КОНВЕРСИЯ:</b>\n"
+            f"└ Из посетителей в покупатели: <b>{conversion}%</b>"
+        )
 
-    await call.message.edit_text(
-        stats_text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Обновить", callback_data="full_stats")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
-        ])
-    )
+        await call.message.edit_text(
+            stats_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="full_stats")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
+            ])
+        )
+    except Exception as e:
+        if "message is not modified" in str(e):
+            await call.answer("✅ Статистика актуальна", show_alert=False)
+        else:
+            logger.error(f"❌ Ошибка в статистике: {e}")
+            await call.answer("❌ Ошибка при загрузке статистики", show_alert=True)
 
 # === УПРАВЛЕНИЕ КАНАЛАМИ ===
 @dp.callback_query(F.data == "manage_channels")
@@ -1095,47 +1106,58 @@ async def show_recent_payments(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     
-    async with aiosqlite.connect("vpn_shop.db") as db:
-        async with db.execute("""
-            SELECT p.username, c.name, p.amount, p.status, p.created_at
-            FROM payments p
-            JOIN configs c ON p.config_id = c.id
-            ORDER BY p.created_at DESC
-            LIMIT 15
-        """) as cursor:
-            payments = await cursor.fetchall()
+    try:
+        async with aiosqlite.connect("vpn_shop.db") as db:
+            async with db.execute("""
+                SELECT p.username, c.name, p.amount, p.status, p.created_at
+                FROM payments p
+                JOIN configs c ON p.config_id = c.id
+                ORDER BY p.created_at DESC
+                LIMIT 15
+            """) as cursor:
+                payments = await cursor.fetchall()
 
-    if not payments:
-        return await call.message.edit_text(
-            "💳 <b>Платежей пока нет</b>",
+        if not payments:
+            return await call.message.edit_text(
+                "💳 <b>Платежей пока нет</b>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
+                ])
+            )
+
+        text = "💳 <b>Последние 15 платежей:</b>\n\n"
+        for username, conf_name, amount, status, created_at in payments:
+            status_emoji = "✅" if status == "succeeded" else "⏳"
+            date = created_at[:16].replace('T', ' ')
+            text += f"{status_emoji} @{username}\n"
+            text += f"   └ {conf_name} | {int(amount)}₽ | {date}\n\n"
+
+        await call.message.edit_text(
+            text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="recent_payments")],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
             ])
         )
-
-    text = "💳 <b>Последние 15 платежей:</b>\n\n"
-    for username, conf_name, amount, status, created_at in payments:
-        status_emoji = "✅" if status == "succeeded" else "⏳"
-        date = created_at[:16].replace('T', ' ')
-        text += f"{status_emoji} @{username}\n"
-        text += f"   └ {conf_name} | {int(amount)}₽ | {date}\n\n"
-
-    await call.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Обновить", callback_data="recent_payments")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_admin")]
-        ])
-    )
+    except Exception as e:
+        if "message is not modified" in str(e):
+            await call.answer("✅ Данные актуальны", show_alert=False)
+        else:
+            logger.error(f"❌ Ошибка в платежах: {e}")
+            await call.answer("❌ Ошибка при загрузке платежей", show_alert=True)
 
 @dp.callback_query(F.data == "back_admin")
 async def back_to_admin(call: types.CallbackQuery):
     """Вернуться в админ-панель"""
-    await call.message.edit_text(
-        "🛠 <b>Панель управления WIXYEZ VPN</b>\n\n"
-        "Выберите нужное действие:",
-        reply_markup=admin_menu()
-    )
+    try:
+        await call.message.edit_text(
+            "🛠 <b>Панель управления WIXYEZ VPN</b>\n\n"
+            "Выберите нужное действие:",
+            reply_markup=admin_menu()
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Ошибка в back_to_admin: {e}")
 
 # ====================== ЗАПУСК БОТА ======================
 async def on_startup():
